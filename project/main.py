@@ -1,10 +1,11 @@
 #!/usr/bin/env python
-import asyncio
+
 # coding: utf-8
 
 import os
 import shutil
 import zipfile
+import asyncio
 
 
 async def zip_file(output_path: str, input_path: str, item: str) -> None:
