@@ -7,6 +7,7 @@ import shutil
 import zipfile
 import asyncio
 
+from project.ConfigKeeper import config_keeper
 from project.DuplicateFinder import duplicate_finder
 
 
@@ -30,18 +31,15 @@ def check_dirs(roms_dir: str, output_dir: str) -> None:
 
 
 async def main() -> None:
-    roms: str = '/Users/bengunn/Documents/smd_roms'
-    output: str = '/Users/bengunn/Documents/processed_smd_roms'
-
-    check_dirs(roms, output)
-    rom_files: list = os.listdir(roms)
+    check_dirs(config_keeper.roms_dir, config_keeper.output_dir)
+    rom_files: list = os.listdir(config_keeper.roms_dir)
     cleaned_rom_files = duplicate_finder.exclude(rom_files)
 
     tasks: list = []
     for item in cleaned_rom_files:
         item_no_ext: str = os.path.splitext(item)[0]
-        input_path: str = os.path.join(roms, item)
-        output_path: str = os.path.join(output, f'{item_no_ext}.zip')
+        input_path: str = os.path.join(config_keeper.roms_dir, item)
+        output_path: str = os.path.join(config_keeper.output_dir, f'{item_no_ext}.zip')
         tasks.append(asyncio.create_task(zip_file(output_path, input_path, item)))
 
     await asyncio.gather(*tasks)
