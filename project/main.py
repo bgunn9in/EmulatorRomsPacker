@@ -7,7 +7,7 @@ import shutil
 import zipfile
 import asyncio
 
-# from project.DuplicateFinder import duplicate_finder
+from project.DuplicateFinder import duplicate_finder
 
 
 async def zip_file(output_path: str, input_path: str, item: str) -> None:
@@ -35,10 +35,10 @@ async def main() -> None:
 
     check_dirs(roms, output)
     rom_files: list = os.listdir(roms)
-    # duplicates: list = duplicate_finder.find(rom_files)
+    cleaned_rom_files = duplicate_finder.exclude(rom_files)
 
     tasks: list = []
-    for item in rom_files:
+    for item in cleaned_rom_files:
         item_no_ext: str = os.path.splitext(item)[0]
         input_path: str = os.path.join(roms, item)
         output_path: str = os.path.join(output, f'{item_no_ext}.zip')
