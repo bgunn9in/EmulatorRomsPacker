@@ -12,20 +12,28 @@ class DuplicateFinder:
             re.compile(r'\s+\(.*\).*\[.*\)', re.IGNORECASE),
             re.compile(r'\s+\(.*\)', re.IGNORECASE),
         ]
+        self.__regions: list = ['(U)', '(E)', '(UE)', '(W)', ]
 
     @staticmethod
-    def __region_filter(region_data: str) -> bool:
-        regions: list = ['(U)', '(E)', '(UE)', '(W)', ]
-        for region in regions:
-            if region in region_data:
-                return False
-        return True
+    def __region_filter(region: iter, region_data: str) -> bool:
+        try:
+            r: str = next(region)
+        except StopIteration:
+            return True
+
+        if r in region_data:
+            return False
+        return DuplicateFinder.__region_filter(region, region_data)
 
     def __extract_details(self, regex: iter, file: str, files: list) -> str:
-        result: list = next(regex).findall(file)
+        try:
+            result: list = next(regex).findall(file)
+        except StopIteration:
+            return ''
+
         if len(result) == 0:
             return self.__extract_details(regex, file, files)
-        if self.__region_filter(file):
+        if self.__region_filter(iter(self.__regions), file):
             return ''
         return file
 
