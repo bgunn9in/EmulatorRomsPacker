@@ -27,12 +27,8 @@ class ConfigKeeper:
         return True
 
     def __parse_config(self, data: dict) -> bool:
-        config_readers: list = [
-            self.__config_roms_dir,
-            self.__config_output_dir,
-        ]
         print('Reading config...')
-        for cr in config_readers:
+        for cr in [self.__config_roms_dir, self.__config_output_dir]:
             if not cr(data):
                 return False
         print('Config ok.')
