@@ -35,5 +35,6 @@
   "recursive": false,
   "overwrite": false,
   "dry_run": false,
-  "workers": 4
+  "workers": 4,
+  "log_file": "output/roms_packer.events.jsonl"
 }

@@ -12,6 +12,7 @@ import threading
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -189,6 +190,7 @@ class AppConfig:
     dry_run: bool
     prefer_revision: str
     workers: int
+    log_file: Path | None
 
 
 @dataclass(frozen=True)
@@ -210,6 +212,8 @@ class ProcessResult:
     selected: RomCandidate | None
     output_path: Path | None
     reason: str
+    member_count: int = 0
+    candidate_count: int = 0
 
 
 def parse_csv(value: str | Iterable[str] | None) -> list[str]:
@@ -357,6 +361,9 @@ def build_config(args: argparse.Namespace) -> AppConfig:
     if workers < 1:
         raise SystemExit("workers must be a positive integer.")
 
+    log_file = args.log_file or config_get(data, "log_file", "log_path")
+    log_file_path = Path(log_file) if log_file else None
+
     return AppConfig(
         input_dir=Path(input_dir),
         output_dir=Path(output_dir),
@@ -371,6 +378,7 @@ def build_config(args: argparse.Namespace) -> AppConfig:
         dry_run=dry_run,
         prefer_revision=prefer_revision,
         workers=workers,
+        log_file=log_file_path,
     )
 
 
@@ -445,6 +453,11 @@ def create_arg_parser() -> argparse.ArgumentParser:
         "--workers",
         type=int,
         help="Number of archives to process in parallel.",
+    )
+    parser.add_argument(
+        "--log-file",
+        type=Path,
+        help="JSONL file for skipped archives and errors.",
     )
     return parser
 
@@ -576,8 +589,16 @@ def build_candidate(archive_path: Path, member_name: str) -> RomCandidate:
 
 
 def build_candidates(archive_path: Path, config: AppConfig) -> list[RomCandidate]:
+    return build_candidates_from_members(
+        archive_path, list_archive_members(archive_path), config
+    )
+
+
+def build_candidates_from_members(
+    archive_path: Path, member_names: Iterable[str], config: AppConfig
+) -> list[RomCandidate]:
     candidates = []
-    for member_name in list_archive_members(archive_path):
+    for member_name in member_names:
         extension = Path(strip_archive_path(member_name)).suffix.lower()
         if extension not in config.rom_extensions:
             continue
@@ -816,11 +837,23 @@ def process_archive(
     config: AppConfig,
     output_path_allocator: Callable[[RomCandidate], Path] | None = None,
 ) -> ProcessResult:
+    member_count = 0
+    candidate_count = 0
     try:
-        candidates = build_candidates(archive_path, config)
+        member_names = list_archive_members(archive_path)
+        member_count = len(member_names)
+        candidates = build_candidates_from_members(archive_path, member_names, config)
+        candidate_count = len(candidates)
         selected = select_candidate(candidates, config)
         if selected is None:
-            return ProcessResult(archive_path, None, None, "no ROM candidates")
+            return ProcessResult(
+                archive_path,
+                None,
+                None,
+                "no ROM candidates",
+                member_count,
+                candidate_count,
+            )
 
         if output_path_allocator is None:
             output_path = output_archive_path(
@@ -829,7 +862,14 @@ def process_archive(
         else:
             output_path = output_path_allocator(selected)
         if config.dry_run:
-            return ProcessResult(archive_path, selected, output_path, "dry run")
+            return ProcessResult(
+                archive_path,
+                selected,
+                output_path,
+                "dry run",
+                member_count,
+                candidate_count,
+            )
 
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_rom = Path(temp_dir) / member_output_name(selected)
@@ -840,9 +880,48 @@ def process_archive(
                 member_output_name(selected),
                 config.archive_format,
             )
-        return ProcessResult(archive_path, selected, output_path, "ok")
+        return ProcessResult(
+            archive_path, selected, output_path, "ok", member_count, candidate_count
+        )
     except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
-        return ProcessResult(archive_path, None, None, f"error: {exc}")
+        return ProcessResult(
+            archive_path,
+            None,
+            None,
+            f"error: {exc}",
+            member_count,
+            candidate_count,
+        )
+
+
+class JsonlEventLogger:
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._lock = threading.Lock()
+
+    def log_result(self, result: ProcessResult) -> None:
+        is_error = result.reason.startswith("error:")
+        is_skipped = result.selected is None and not is_error
+        if not is_error and not is_skipped:
+            return
+
+        record: dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "error" if is_error else "skipped",
+            "archive": str(result.archive_path),
+            "reason": result.reason,
+            "member_count": result.member_count,
+            "candidate_count": result.candidate_count,
+        }
+        if result.selected is not None:
+            record["selected_member"] = result.selected.member_name
+        if result.output_path is not None:
+            record["output_path"] = str(result.output_path)
+
+        with self._lock:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            with self._path.open("a", encoding="utf-8") as file:
+                file.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def print_config(config: AppConfig) -> None:
@@ -854,6 +933,8 @@ def print_config(config: AppConfig) -> None:
     print(f"Region priority: {', '.join(config.region_priority)}")
     print(f"Selection order: {', '.join(config.selection_order)}")
     print(f"Workers: {config.workers}")
+    if config.log_file is not None:
+        print(f"Log file: {config.log_file}")
 
 
 def print_result(result: ProcessResult) -> None:
@@ -888,10 +969,12 @@ def run(config: AppConfig) -> int:
         return 0
 
     total = len(archives)
+    logger = JsonlEventLogger(config.log_file) if config.log_file is not None else None
+
     if config.workers == 1:
-        results = process_archives_sequentially(archives, config)
+        results = process_archives_sequentially(archives, config, logger)
     else:
-        results = process_archives_in_parallel(archives, config)
+        results = process_archives_in_parallel(archives, config, logger)
 
     ok = sum(1 for result in results if result.selected is not None)
     skipped = len(results) - ok
@@ -901,7 +984,7 @@ def run(config: AppConfig) -> int:
 
 
 def process_archives_sequentially(
-    archives: list[Path], config: AppConfig
+    archives: list[Path], config: AppConfig, logger: JsonlEventLogger | None
 ) -> list[ProcessResult]:
     results = []
     total = len(archives)
@@ -910,11 +993,13 @@ def process_archives_sequentially(
         result = process_archive(archive, config)
         results.append(result)
         print_result(result)
+        if logger is not None:
+            logger.log_result(result)
     return results
 
 
 def process_archives_in_parallel(
-    archives: list[Path], config: AppConfig
+    archives: list[Path], config: AppConfig, logger: JsonlEventLogger | None
 ) -> list[ProcessResult]:
     results = []
     total = len(archives)
@@ -935,6 +1020,8 @@ def process_archives_in_parallel(
                 result = ProcessResult(archive, None, None, f"error: {exc}")
             results.append(result)
             print_result(result)
+            if logger is not None:
+                logger.log_result(result)
     return results
 
 

@@ -42,6 +42,7 @@ def make_config(**overrides):
         "dry_run": False,
         "prefer_revision": "newest",
         "workers": 1,
+        "log_file": None,
     }
     values.update(overrides)
     return AppConfig(**values)
@@ -334,6 +335,7 @@ class ConfigTests(unittest.TestCase):
                         "dry_run": True,
                         "prefer_revision": "oldest",
                         "workers": 3,
+                        "log_file": "logs/events.jsonl",
                     }
                 ),
                 encoding="utf-8",
@@ -355,6 +357,7 @@ class ConfigTests(unittest.TestCase):
             self.assertTrue(config.dry_run)
             self.assertEqual(config.prefer_revision, "oldest")
             self.assertEqual(config.workers, 3)
+            self.assertEqual(config.log_file, Path("logs/events.jsonl"))
 
     def test_build_config_cli_overrides_json_config(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -394,6 +397,8 @@ class ConfigTests(unittest.TestCase):
                     "--no-recursive",
                     "--workers",
                     "2",
+                    "--log-file",
+                    "cli-log.jsonl",
                 ]
             )
             config = build_config(args)
@@ -406,6 +411,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.quality_priority, ["verified"])
             self.assertFalse(config.recursive)
             self.assertEqual(config.workers, 2)
+            self.assertEqual(config.log_file, Path("cli-log.jsonl"))
 
     def test_build_config_rejects_unknown_selection_key(self):
         args = create_arg_parser().parse_args(["--selection-order", "region,size"])
@@ -452,6 +458,40 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertIn("Workers: 2", output.getvalue())
             self.assertIn("Done. Selected: 2. Skipped: 0. Errors: 0.", output.getvalue())
+
+    def test_run_logs_skipped_archives_and_errors(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            log_file = root / "logs" / "events.jsonl"
+            input_dir.mkdir()
+            with zipfile.ZipFile(input_dir / "NoRom.zip", "w") as archive:
+                archive.writestr("readme.txt", b"not a rom")
+            (input_dir / "Broken.zip").write_bytes(b"not a zip")
+
+            output = StringIO()
+            with redirect_stdout(output):
+                exit_code = run(
+                    make_config(
+                        input_dir=input_dir,
+                        output_dir=output_dir,
+                        log_file=log_file,
+                    )
+                )
+
+            self.assertEqual(exit_code, 1)
+            records = [
+                json.loads(line)
+                for line in log_file.read_text(encoding="utf-8").splitlines()
+            ]
+            events = {record["event"] for record in records}
+            reasons = {record["reason"] for record in records}
+            self.assertEqual(events, {"skipped", "error"})
+            self.assertIn("no ROM candidates", reasons)
+            self.assertTrue(any(reason.startswith("error:") for reason in reasons))
+            self.assertTrue(all("member_count" in record for record in records))
+            self.assertTrue(all("candidate_count" in record for record in records))
 
 
 if __name__ == "__main__":

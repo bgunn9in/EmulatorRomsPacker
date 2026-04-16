@@ -38,6 +38,16 @@ run.cmd --workers 4
 ./run.sh --workers 4
 ```
 
+Skipped archives and processing errors are written as JSON Lines when `log_file`
+is set in `config.json`:
+
+```json
+"log_file": "output/roms_packer.events.jsonl"
+```
+
+Each record includes the archive path, reason, member count and ROM candidate
+count, so failed runs can be analyzed after processing.
+
 Extra CLI arguments are passed through to `main.py`, so dry-run is:
 
 ```cmd
