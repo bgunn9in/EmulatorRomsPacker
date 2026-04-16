@@ -1,4 +1,39 @@
 {
-  "roms_dir": "/Users/bengunn/Documents/smd_roms",
-  "output_dir": "/Users/bengunn/Documents/processed_smd_roms"
+  "input_dir": "input",
+  "output_dir": "output",
+  "archive_format": "7z",
+  "language_priority": ["Rus", "original"],
+  "quality_priority": [
+    "verified",
+    "good-checksum",
+    "unknown",
+    "translation",
+    "alternate",
+    "fixed",
+    "overdump",
+    "pirate",
+    "hack",
+    "trained",
+    "bad"
+  ],
+  "region_priority": ["U", "E", "W", "J"],
+  "selection_order": ["language", "quality", "region", "revision"],
+  "prefer_revision": "newest",
+  "rom_extensions": [
+    ".bin",
+    ".gen",
+    ".md",
+    ".smd",
+    ".32x",
+    ".nes",
+    ".fds",
+    ".smc",
+    ".sfc",
+    ".fig",
+    ".swc"
+  ],
+  "recursive": false,
+  "overwrite": false,
+  "dry_run": false,
+  "workers": 4
 }

@@ -1,0 +1,23 @@
+project_root_markers = []
+
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+
+model = "gpt-5.4"
+model_reasoning_effort = "high"
+personality = "pragmatic"
+
+project_doc_fallback_filenames = ["README.md", "ARCHITECTURE.md"]
+file_opener = "none"
+web_search = "live"
+
+[windows]
+sandbox = "elevated"
+sandbox_private_desktop = false
+
+[features]
+multi_agent = true
+
+[agents]
+max_threads = 3
+max_depth = 1
